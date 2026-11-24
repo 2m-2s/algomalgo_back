@@ -1,0 +1,141 @@
+# src/main/resources/application.yaml
+# 프로필: 기본 local, 운영은 SPRING_PROFILES_ACTIVE=prod (아래 --- 구간)
+# 비밀값(DB/Redis 비밀번호, GitHub OAuth)은 이 파일에 쓰지 않는다. 기본값도 두지 않는다.
+#  - 로컬: 프로젝트 루트의 .env 를 아래 spring.config.import 로 읽는다 (IDE/bootRun 실행 시 작업 디렉터리 = 프로젝트 루트)
+#  - Docker: docker-compose 가 넣어 준 환경변수를 읽는다. OS 환경변수가 .env 보다 우선한다.
+#  - 값이 없으면 기동 시 "Could not resolve placeholder" 로 멈춘다 (빈 비밀번호로 뜨는 것 방지)
+
+spring:
+  application:
+    name: algomalgo
+  config:
+    # .env 는 KEY=VALUE 형식이라 properties 로 읽을 수 있다. 파일이 없어도(optional) 에러 없음
+    import: optional:file:.env[.properties]
+  profiles:
+    default: local
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  jpa:
+    open-in-view: false
+    hibernate:
+      # 스키마는 Flyway가 만들고 JPA는 검증만 한다
+      ddl-auto: ${DDL_AUTO:validate}
+    properties:
+      hibernate:
+        default_batch_fetch_size: 100
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: false # 임시
+    locations: classpath:db/migration
+  sql:
+    init:
+      mode: always          # [임시] Postgres 같은 외부 DB는 이게 있어야 schema.sql이 실행됨
+      schema-locations: classpath:schema.sql
+    # 파일명 규칙: V{버전}__{설명}.sql (예: V1__init.sql). 한 번 적용된 파일은 수정하지 말고 V2, V3 로 추가한다
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD}
+  session:
+    # Boot 4.0부터 spring.session.redis.* -> spring.session.data.redis.* (옛 키는 무시됨)
+    data:
+      redis:
+        namespace: "algomalgo:session"
+  jackson:
+    # success/code/message/data 4필드를 항상 내려보내므로 null을 생략하지 않는다
+    default-property-inclusion: always
+  task:
+    scheduling:
+      pool:
+        size: 2
+  # [GitHub 담당자] OAuth 로그인은 spring.security.oauth2.client.registration.github.* 에 추가한다
+  # (client-id/secret은 .env 의 GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET 으로 받는다)
+
+server:
+  port: 8080
+  # nginx 뒤에서 X-Forwarded-* 헤더를 해석한다 (Boot 4.2에서 server.forward-headers-strategy 대체)
+  request:
+    header:
+      forwarded:
+        strategy: framework
+  servlet:
+    session:
+      timeout: 60m
+      cookie:
+        name: SESSION
+        http-only: true
+        same-site: lax
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+  # springdoc: 경로는 기본값(/swagger-ui/index.html, /v3/api-docs)을 쓴다. 켜고 끄기만 프로필별로 둔다
+
+app:
+  frontend-url: ${FRONTEND_URL:http://localhost:5173}
+  cors:
+    allowed-origins: ${FRONTEND_URL:http://localhost:5173}
+  async:
+    core-pool-size: 4
+    max-pool-size: 8
+    queue-capacity: 100
+    # 외부 AI 분석 동시 처리 최대 10건
+    analysis-concurrency: 10
+    analysis-queue-capacity: 100
+
+---
+# 로컬 개발 (기본)
+spring:
+  config:
+    activate:
+      on-profile: local
+  jpa:
+    properties:
+      hibernate:
+        format_sql: true
+
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+
+app:
+  cors:
+    # Vite 개발 서버와 nginx(80) 둘 다 허용
+    allowed-origins: ${FRONTEND_URL:http://localhost:5173},http://localhost
+
+logging:
+  level:
+    org.hibernate.SQL: ${SQL_LOG_LEVEL:DEBUG}
+    com._2m2s.algomalgo: DEBUG
+
+---
+# 운영 (Docker Compose 기본 프로필)
+spring:
+  config:
+    activate:
+      on-profile: prod
+  jpa:
+    properties:
+      hibernate:
+        format_sql: false
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+logging:
+  level:
+    org.hibernate.SQL: ${SQL_LOG_LEVEL:WARN}
+    com._2m2s.algomalgo: INFO
+ 
